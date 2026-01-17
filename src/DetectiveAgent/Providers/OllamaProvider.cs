@@ -1,9 +1,11 @@
 namespace DetectiveAgent.Providers;
 
+using System.Diagnostics;
 using System.Net.Http.Json;
 using System.Text.Json;
 using System.Text.Json.Serialization;
 using DetectiveAgent.Core;
+using DetectiveAgent.Observability;
 using Microsoft.Extensions.Logging;
 
 /// <summary>
@@ -37,6 +39,16 @@ public class OllamaProvider : ILlmProvider
         float? temperature = null,
         int? maxTokens = null)
     {
+        using var activity = AgentActivitySource.Instance.StartActivity(
+            "Provider.Complete",
+            ActivityKind.Client);
+
+        activity?.SetTag("provider", "Ollama");
+        activity?.SetTag("model", _model);
+        activity?.SetTag("temperature", temperature ?? 0.7f);
+        activity?.SetTag("max_tokens", maxTokens ?? 4096);
+        activity?.SetTag("message_count", messages.Count);
+
         try
         {
             // Convert messages to OpenAI format that Ollama supports
@@ -87,10 +99,29 @@ public class OllamaProvider : ILlmProvider
 
             if (ollamaResponse == null || ollamaResponse.Message == null)
             {
+                activity?.SetStatus(ActivityStatusCode.Error, "Empty response");
                 throw new LlmProviderException("Empty response from Ollama API");
             }
 
             var messageContent = ollamaResponse.Message.Content;
+            
+            // Add token usage to trace
+            if (ollamaResponse.PromptEvalCount.HasValue)
+            {
+                activity?.SetTag("inputTokens", ollamaResponse.PromptEvalCount.Value);
+            }
+            if (ollamaResponse.EvalCount.HasValue)
+            {
+                activity?.SetTag("outputTokens", ollamaResponse.EvalCount.Value);
+            }
+            if (ollamaResponse.PromptEvalCount.HasValue && ollamaResponse.EvalCount.HasValue)
+            {
+                activity?.SetTag("totalTokens", ollamaResponse.PromptEvalCount.Value + ollamaResponse.EvalCount.Value);
+            }
+            if (ollamaResponse.TotalDuration.HasValue)
+            {
+                activity?.SetTag("duration_ns", ollamaResponse.TotalDuration.Value);
+            }
             var metadata = new Dictionary<string, object>
             {
                 ["model"] = _model,
@@ -114,6 +145,8 @@ public class OllamaProvider : ILlmProvider
             _logger.LogInformation("Received response from Ollama: {PromptTokens} prompt tokens, {CompletionTokens} completion tokens",
                 ollamaResponse.PromptEvalCount ?? 0, ollamaResponse.EvalCount ?? 0);
 
+            activity?.SetStatus(ActivityStatusCode.Ok);
+            
             return new Message(
                 MessageRole.Assistant,
                 messageContent,
@@ -123,7 +156,13 @@ public class OllamaProvider : ILlmProvider
         catch (HttpRequestException ex)
         {
             _logger.LogError(ex, "Network error communicating with Ollama. Is the container running?");
+            activity?.SetStatus(ActivityStatusCode.Error, ex.Message);
             throw new NetworkException("Network error communicating with Ollama. Ensure container is running and accessible.", ex);
+        }
+        catch (Exception ex)
+        {
+            activity?.SetStatus(ActivityStatusCode.Error, ex.Message);
+            throw;
         }
     }
 

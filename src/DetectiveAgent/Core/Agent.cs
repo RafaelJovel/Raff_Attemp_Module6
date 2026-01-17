@@ -57,10 +57,19 @@ public class Agent
             throw new InvalidOperationException("No active conversation");
         }
 
+        // Capture trace ID if not already set
+        if (string.IsNullOrEmpty(_currentConversation.TraceId) && activity != null)
+        {
+            _currentConversation = _currentConversation with 
+            { 
+                TraceId = activity.TraceId.ToString() 
+            };
+        }
+
         // Add trace tags
         activity?.SetTag("conversation.id", _currentConversation.Id);
         activity?.SetTag("message.length", content.Length);
-        activity?.SetTag("message.count", _currentConversation.Messages.Count);
+        activity?.SetTag("message.count", _currentConversation.Messages.Count + 1);
 
         _logger.LogInformation("Sending user message: {MessagePreview}...", 
             content.Length > 50 ? content.Substring(0, 50) : content);
@@ -93,19 +102,40 @@ public class Agent
             _currentConversation.Messages.Add(assistantMessage);
 
             // Extract token information from metadata
+            int inputTokens = 0;
+            int outputTokens = 0;
+            
             if (assistantMessage.Metadata != null)
             {
-                if (assistantMessage.Metadata.TryGetValue("inputTokens", out var inputTokens))
+                if (assistantMessage.Metadata.TryGetValue("inputTokens", out var inputTokensObj))
                 {
+                    inputTokens = Convert.ToInt32(inputTokensObj);
                     activity?.SetTag("tokens.input", inputTokens);
                 }
-                if (assistantMessage.Metadata.TryGetValue("outputTokens", out var outputTokens))
+                else if (assistantMessage.Metadata.TryGetValue("input_tokens", out var inputTokensObj2))
                 {
+                    inputTokens = Convert.ToInt32(inputTokensObj2);
+                    activity?.SetTag("tokens.input", inputTokens);
+                }
+                
+                if (assistantMessage.Metadata.TryGetValue("outputTokens", out var outputTokensObj))
+                {
+                    outputTokens = Convert.ToInt32(outputTokensObj);
                     activity?.SetTag("tokens.output", outputTokens);
                 }
-                if (assistantMessage.Metadata.TryGetValue("totalTokens", out var totalTokens))
+                else if (assistantMessage.Metadata.TryGetValue("output_tokens", out var outputTokensObj2))
                 {
-                    activity?.SetTag("tokens.total", totalTokens);
+                    outputTokens = Convert.ToInt32(outputTokensObj2);
+                    activity?.SetTag("tokens.output", outputTokens);
+                }
+                
+                if (assistantMessage.Metadata.TryGetValue("totalTokens", out var totalTokensObj))
+                {
+                    activity?.SetTag("tokens.total", totalTokensObj);
+                }
+                else if (inputTokens > 0 || outputTokens > 0)
+                {
+                    activity?.SetTag("tokens.total", inputTokens + outputTokens);
                 }
             }
 
@@ -122,6 +152,19 @@ public class Agent
             
             _currentConversation.Metadata["lastUpdated"] = DateTimeOffset.UtcNow;
             _currentConversation.Metadata["messageCount"] = _currentConversation.Messages.Count;
+            
+            // Track cumulative token usage at conversation level
+            if (inputTokens > 0 || outputTokens > 0)
+            {
+                var totalInput = Convert.ToInt32(_currentConversation.Metadata.GetValueOrDefault("totalInputTokens", 0)) + inputTokens;
+                var totalOutput = Convert.ToInt32(_currentConversation.Metadata.GetValueOrDefault("totalOutputTokens", 0)) + outputTokens;
+                
+                _currentConversation.Metadata["totalInputTokens"] = totalInput;
+                _currentConversation.Metadata["totalOutputTokens"] = totalOutput;
+                _currentConversation.Metadata["totalTokens"] = totalInput + totalOutput;
+                
+                activity?.SetTag("conversation.total_tokens", totalInput + totalOutput);
+            }
 
             // Save conversation
             await _store.SaveAsync(_currentConversation, cancellationToken);
@@ -147,8 +190,14 @@ public class Agent
     /// </summary>
     public void StartNewConversation(string? systemPrompt = null)
     {
+        using var activity = AgentActivitySource.Instance.StartActivity(
+            "Agent.StartNewConversation",
+            ActivityKind.Internal);
+            
         var conversationId = Guid.NewGuid().ToString();
-        var traceId = Activity.Current?.TraceId.ToString();
+        var traceId = activity?.TraceId.ToString();
+        
+        activity?.SetTag("conversation.id", conversationId);
         
         _currentConversation = new Conversation
         {
@@ -160,12 +209,17 @@ public class Agent
             Metadata = new Dictionary<string, object>
             {
                 ["provider"] = _provider.GetType().Name,
-                ["capabilities"] = _provider.GetCapabilities()
+                ["capabilities"] = _provider.GetCapabilities(),
+                ["totalInputTokens"] = 0,
+                ["totalOutputTokens"] = 0,
+                ["totalTokens"] = 0
             }
         };
 
         _logger.LogInformation("Started new conversation {ConversationId} with trace {TraceId}", 
             conversationId, traceId ?? "none");
+            
+        activity?.SetStatus(ActivityStatusCode.Ok);
     }
 
     /// <summary>
