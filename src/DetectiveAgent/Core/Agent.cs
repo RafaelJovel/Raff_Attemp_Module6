@@ -17,6 +17,7 @@ public class Agent
     private Conversation? _currentConversation;
     private readonly float _defaultTemperature;
     private readonly int _defaultMaxTokens;
+    private readonly string _systemPrompt;
 
     public Agent(
         ILlmProvider provider,
@@ -31,9 +32,10 @@ public class Agent
         _logger = logger ?? throw new ArgumentNullException(nameof(logger));
         _defaultTemperature = defaultTemperature;
         _defaultMaxTokens = defaultMaxTokens;
+        _systemPrompt = systemPrompt;
 
-        // Start a new conversation
-        StartNewConversation(systemPrompt);
+        // Don't create conversation here - will be lazily created on first use
+        // This ensures OpenTelemetry is initialized before creating activities
     }
 
     /// <summary>
@@ -52,13 +54,15 @@ public class Agent
             throw new ArgumentException("Message content cannot be empty", nameof(content));
         }
 
+        // Lazy initialization: create conversation on first use if it doesn't exist
+        // This ensures OpenTelemetry is initialized before creating activities
         if (_currentConversation == null)
         {
-            throw new InvalidOperationException("No active conversation");
+            StartNewConversation(_systemPrompt);
         }
 
-        // Capture trace ID if not already set
-        if (string.IsNullOrEmpty(_currentConversation.TraceId) && activity != null)
+        // Capture trace ID if not already set (update with current activity's trace)
+        if (string.IsNullOrEmpty(_currentConversation!.TraceId) && activity != null)
         {
             _currentConversation = _currentConversation with 
             { 

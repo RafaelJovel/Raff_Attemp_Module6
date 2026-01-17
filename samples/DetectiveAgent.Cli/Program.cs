@@ -124,6 +124,10 @@ await host.StartAsync();
 var agent = host.Services.GetRequiredService<Agent>();
 var conversationStore = host.Services.GetRequiredService<IConversationStore>();
 
+// Create initial conversation AFTER OpenTelemetry is initialized
+// This ensures the conversation gets a proper trace ID
+agent.StartNewConversation(systemPrompt);
+
 Console.WriteLine("═══════════════════════════════════════════════════════════");
 Console.WriteLine("   Detective Agent CLI");
 Console.WriteLine("═══════════════════════════════════════════════════════════");

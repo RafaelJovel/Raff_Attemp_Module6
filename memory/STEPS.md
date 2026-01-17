@@ -88,16 +88,25 @@ dotnet run --project samples/DetectiveAgent.Cli
 - HTTP requests automatically instrumented
 
 **Acceptance Criteria:**
-- Each conversation has a unique trace ID (Activity.TraceId)
-- Traces saved to filesystem in OpenTelemetry JSON format
-- Spans capture: operation name, duration, start/end times using Activity
-- Provider call spans include: model, tokens (input/output), duration
-- Conversation spans include: message count, total tokens
-- Trace files are human-readable and well-organized
-- Can correlate conversation JSON with its trace JSON via trace ID
-- Automated tests verify trace generation
-- OpenTelemetry configured in dependency injection
-- ActivitySource registered as singleton
+- ✅ Each conversation has a unique trace ID (Activity.TraceId)
+- ✅ Traces saved to filesystem in OpenTelemetry JSON format
+- ✅ Spans capture: operation name, duration, start/end times using Activity
+- ✅ Provider call spans include: model, tokens (input/output), duration
+- ✅ Conversation spans include: message count, total tokens
+- ✅ Trace files are human-readable and well-organized
+- ✅ Can correlate conversation JSON with its trace JSON via trace ID (traceId field is present in saved conversation JSON files)
+- ✅ Automated tests verify trace generation
+- ✅ OpenTelemetry configured in dependency injection
+- ✅ ActivitySource registered as singleton (implemented as static in AgentActivitySource)
+
+**Resolution:**
+- **Root Cause**: Agent constructor was creating conversations before OpenTelemetry was initialized in Program.cs, resulting in null Activity and no TraceId capture
+- **Solution Implemented**:
+  1. Changed Agent to use lazy initialization - no conversation created in constructor
+  2. Conversation is created on first `SendMessageAsync()` call or explicit `StartNewConversation()` call
+  3. Updated Program.cs to explicitly call `StartNewConversation()` after `host.StartAsync()` to ensure OpenTelemetry is initialized
+  4. Updated tests to account for lazy initialization behavior
+- **Verification**: Manual testing confirmed traceId is now properly saved in conversation JSON files and can be correlated with trace files
 
 **Key NuGet Packages:**
 - OpenTelemetry

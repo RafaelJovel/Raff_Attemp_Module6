@@ -185,6 +185,12 @@ public class TracingTests
         
         // Act
         var agent = new Agent(mockProvider.Object, mockStore.Object, mockLogger.Object);
+        
+        // With lazy initialization, no conversation exists until StartNewConversation is called
+        Assert.Null(agent.GetCurrentConversationId());
+        
+        // Now create a conversation - it should capture the trace ID from the current activity
+        agent.StartNewConversation();
         var conversationId = agent.GetCurrentConversationId();
 
         // Assert
@@ -192,6 +198,6 @@ public class TracingTests
         Assert.NotNull(activity);
         
         // The conversation should be created within an activity context
-        // Note: In real usage, the trace ID would be set when SendMessageAsync creates an activity
+        // The trace ID would be set when StartNewConversation creates an activity
     }
 }

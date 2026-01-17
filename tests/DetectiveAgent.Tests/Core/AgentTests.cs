@@ -195,9 +195,14 @@ public class AgentTests
             _mockStore.Object,
             _mockLogger.Object);
 
-        var firstConversationId = agent.GetCurrentConversationId();
+        // No conversation exists initially (lazy initialization)
+        Assert.Null(agent.GetCurrentConversationId());
 
-        // Act
+        // Act - create first conversation
+        agent.StartNewConversation("First system prompt");
+        var firstConversationId = agent.GetCurrentConversationId();
+        
+        // Act - create second conversation
         agent.StartNewConversation("New system prompt");
         var secondConversationId = agent.GetCurrentConversationId();
 
