@@ -22,28 +22,62 @@ builder.Logging.ClearProviders();
 builder.Logging.AddConsole();
 
 // Register services
-var apiKey = configuration["Providers:Anthropic:ApiKey"] 
-    ?? Environment.GetEnvironmentVariable("ANTHROPIC_API_KEY")
-    ?? throw new InvalidOperationException(
-        "Anthropic API key not found. Set it in appsettings.json or ANTHROPIC_API_KEY environment variable.");
-
-var model = configuration["Providers:Anthropic:Model"] ?? "claude-3-5-sonnet-20241022";
 var conversationsPath = configuration["Storage:ConversationsPath"] ?? "./data/conversations";
 var systemPrompt = configuration["Agent:SystemPrompt"] ?? "You are a helpful AI assistant.";
 var temperature = float.Parse(configuration["Agent:Temperature"] ?? "0.7");
 var maxTokens = int.Parse(configuration["Agent:MaxTokens"] ?? "4096");
+var defaultProvider = configuration["Agent:DefaultProvider"] ?? "Anthropic";
 
-// Register HttpClient for Anthropic provider
-builder.Services.AddHttpClient<ILlmProvider, AnthropicProvider>((sp, client) =>
+// Register provider based on configuration
+switch (defaultProvider.ToLowerInvariant())
 {
-    client.BaseAddress = new Uri("https://api.anthropic.com");
-})
-.Services.AddSingleton<ILlmProvider>(sp =>
-{
-    var httpClient = sp.GetRequiredService<IHttpClientFactory>().CreateClient(nameof(AnthropicProvider));
-    var logger = sp.GetRequiredService<ILogger<AnthropicProvider>>();
-    return new AnthropicProvider(httpClient, logger, apiKey, model);
-});
+    case "anthropic":
+        var anthropicApiKey = configuration["Providers:Anthropic:ApiKey"] 
+            ?? Environment.GetEnvironmentVariable("ANTHROPIC_API_KEY")
+            ?? throw new InvalidOperationException(
+                "Anthropic API key not found. Set it in appsettings.json or ANTHROPIC_API_KEY environment variable.");
+        
+        var anthropicModel = configuration["Providers:Anthropic:Model"] ?? "claude-3-5-sonnet-20241022";
+        var anthropicBaseUrl = configuration["Providers:Anthropic:BaseUrl"] ?? "https://api.anthropic.com";
+        
+        builder.Services.AddHttpClient<ILlmProvider, AnthropicProvider>((sp, client) =>
+        {
+            client.BaseAddress = new Uri(anthropicBaseUrl);
+        })
+        .Services.AddSingleton<ILlmProvider>(sp =>
+        {
+            var httpClient = sp.GetRequiredService<IHttpClientFactory>().CreateClient(nameof(AnthropicProvider));
+            var logger = sp.GetRequiredService<ILogger<AnthropicProvider>>();
+            return new AnthropicProvider(httpClient, logger, anthropicApiKey, anthropicModel);
+        });
+        
+        Console.WriteLine($"Using Anthropic provider with model: {anthropicModel}");
+        break;
+        
+    case "ollama":
+        var ollamaModel = configuration["Providers:Ollama:Model"] ?? "llama2";
+        var ollamaBaseUrl = configuration["Providers:Ollama:BaseUrl"] ?? "http://localhost:11434";
+        
+        builder.Services.AddHttpClient(nameof(OllamaProvider), client =>
+        {
+            client.BaseAddress = new Uri(ollamaBaseUrl);
+            client.Timeout = TimeSpan.FromMinutes(5); // Ollama can be slow on first load
+        });
+        
+        builder.Services.AddSingleton<ILlmProvider>(sp =>
+        {
+            var httpClientFactory = sp.GetRequiredService<IHttpClientFactory>();
+            var httpClient = httpClientFactory.CreateClient(nameof(OllamaProvider));
+            var logger = sp.GetRequiredService<ILogger<OllamaProvider>>();
+            return new OllamaProvider(httpClient, logger, ollamaModel);
+        });
+        
+        Console.WriteLine($"Using Ollama provider with model: {ollamaModel} at {ollamaBaseUrl}");
+        break;
+        
+    default:
+        throw new InvalidOperationException($"Unknown provider: {defaultProvider}. Supported providers: Anthropic, Ollama");
+}
 
 // Register conversation store
 builder.Services.AddSingleton<IConversationStore>(sp =>
