@@ -3,6 +3,7 @@ using DetectiveAgent.Context;
 using DetectiveAgent.Core;
 using DetectiveAgent.Observability;
 using DetectiveAgent.Providers;
+using DetectiveAgent.Retry;
 using DetectiveAgent.Storage;
 using Microsoft.Extensions.Configuration;
 using Microsoft.Extensions.DependencyInjection;
@@ -10,6 +11,8 @@ using Microsoft.Extensions.Hosting;
 using Microsoft.Extensions.Logging;
 using OpenTelemetry.Resources;
 using OpenTelemetry.Trace;
+using Polly;
+using Polly.Extensions.Http;
 
 // Build configuration
 var configuration = new ConfigurationBuilder()
@@ -49,6 +52,50 @@ var temperature = float.Parse(configuration["Agent:Temperature"] ?? "0.7");
 var maxTokens = int.Parse(configuration["Agent:MaxTokens"] ?? "4096");
 var defaultProvider = configuration["Agent:DefaultProvider"] ?? "Anthropic";
 
+// Load retry configuration
+var retryConfig = new RetryConfiguration();
+configuration.GetSection("Retry").Bind(retryConfig);
+Console.WriteLine($"Retry configuration: MaxAttempts={retryConfig.MaxAttempts}, InitialDelay={retryConfig.InitialDelayMs}ms");
+
+// Helper method to create retry policy
+static IAsyncPolicy<HttpResponseMessage> CreateRetryPolicy(RetryConfiguration config, ILogger logger)
+{
+    return Policy<HttpResponseMessage>
+        .Handle<HttpRequestException>()
+        .Or<TaskCanceledException>()
+        .OrResult(r => r.StatusCode == System.Net.HttpStatusCode.TooManyRequests ||
+                       r.StatusCode == System.Net.HttpStatusCode.InternalServerError ||
+                       r.StatusCode == System.Net.HttpStatusCode.BadGateway ||
+                       r.StatusCode == System.Net.HttpStatusCode.ServiceUnavailable ||
+                       r.StatusCode == System.Net.HttpStatusCode.GatewayTimeout)
+        .WaitAndRetryAsync(
+            config.MaxAttempts,
+            retryAttempt =>
+            {
+                var delay = config.InitialDelayMs * Math.Pow(config.BackoffFactor, retryAttempt - 1);
+                var cappedDelay = Math.Min(delay, config.MaxDelayMs);
+                if (config.UseJitter)
+                {
+                    var jitter = Random.Shared.NextDouble() * 0.3;
+                    cappedDelay = cappedDelay * (1 + jitter);
+                }
+                return TimeSpan.FromMilliseconds(cappedDelay);
+            },
+            onRetry: (outcome, timespan, retryAttempt, context) =>
+            {
+                var statusCode = outcome.Result?.StatusCode.ToString() ?? "Exception";
+                var exception = outcome.Exception?.Message ?? "None";
+                logger.LogWarning(
+                    "Retry attempt {RetryAttempt} after {DelayMs}ms. Status: {StatusCode}, Exception: {Exception}",
+                    retryAttempt, timespan.TotalMilliseconds, statusCode, exception);
+
+                // Add retry information to current activity for tracing
+                var activity = Activity.Current;
+                activity?.SetTag($"retry.attempt_{retryAttempt}.status", statusCode);
+                activity?.SetTag($"retry.attempt_{retryAttempt}.delay_ms", timespan.TotalMilliseconds);
+            });
+}
+
 // Register provider based on configuration
 switch (defaultProvider.ToLowerInvariant())
 {
@@ -61,11 +108,14 @@ switch (defaultProvider.ToLowerInvariant())
         var anthropicModel = configuration["Providers:Anthropic:Model"] ?? "claude-3-5-sonnet-20241022";
         var anthropicBaseUrl = configuration["Providers:Anthropic:BaseUrl"] ?? "https://api.anthropic.com";
         
-        builder.Services.AddHttpClient<ILlmProvider, AnthropicProvider>((sp, client) =>
+        builder.Services.AddHttpClient(nameof(AnthropicProvider), client =>
         {
             client.BaseAddress = new Uri(anthropicBaseUrl);
         })
-        .Services.AddSingleton<ILlmProvider>(sp =>
+        .AddPolicyHandler((sp, req) => CreateRetryPolicy(retryConfig, 
+            sp.GetRequiredService<ILogger<AnthropicProvider>>()));
+        
+        builder.Services.AddSingleton<ILlmProvider>(sp =>
         {
             var httpClient = sp.GetRequiredService<IHttpClientFactory>().CreateClient(nameof(AnthropicProvider));
             var logger = sp.GetRequiredService<ILogger<AnthropicProvider>>();
@@ -83,7 +133,9 @@ switch (defaultProvider.ToLowerInvariant())
         {
             client.BaseAddress = new Uri(ollamaBaseUrl);
             client.Timeout = TimeSpan.FromMinutes(5); // Ollama can be slow on first load
-        });
+        })
+        .AddPolicyHandler((sp, req) => CreateRetryPolicy(retryConfig, 
+            sp.GetRequiredService<ILogger<OllamaProvider>>()));
         
         builder.Services.AddSingleton<ILlmProvider>(sp =>
         {
