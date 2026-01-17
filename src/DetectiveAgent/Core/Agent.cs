@@ -1,6 +1,7 @@
 namespace DetectiveAgent.Core;
 
 using System.Diagnostics;
+using DetectiveAgent.Context;
 using DetectiveAgent.Observability;
 using DetectiveAgent.Providers;
 using DetectiveAgent.Storage;
@@ -14,6 +15,7 @@ public class Agent
     private readonly ILlmProvider _provider;
     private readonly IConversationStore _store;
     private readonly ILogger<Agent> _logger;
+    private readonly ContextWindowManager _contextManager;
     private Conversation? _currentConversation;
     private readonly float _defaultTemperature;
     private readonly int _defaultMaxTokens;
@@ -23,6 +25,7 @@ public class Agent
         ILlmProvider provider,
         IConversationStore store,
         ILogger<Agent> logger,
+        ContextWindowManager contextManager,
         string systemPrompt = "You are a helpful AI assistant.",
         float defaultTemperature = 0.7f,
         int defaultMaxTokens = 4096)
@@ -30,6 +33,7 @@ public class Agent
         _provider = provider ?? throw new ArgumentNullException(nameof(provider));
         _store = store ?? throw new ArgumentNullException(nameof(store));
         _logger = logger ?? throw new ArgumentNullException(nameof(logger));
+        _contextManager = contextManager ?? throw new ArgumentNullException(nameof(contextManager));
         _defaultTemperature = defaultTemperature;
         _defaultMaxTokens = defaultMaxTokens;
         _systemPrompt = systemPrompt;
@@ -88,16 +92,42 @@ public class Agent
 
         try
         {
-            // Get all messages including system prompt
-            var allMessages = new List<Message>
-            {
-                new Message(MessageRole.System, _currentConversation.SystemPrompt, DateTimeOffset.UtcNow)
-            };
-            allMessages.AddRange(_currentConversation.Messages);
+            // Manage context window - truncate if necessary
+            var managedContext = await _contextManager.ManageContextAsync(
+                _currentConversation.SystemPrompt,
+                _currentConversation.Messages,
+                _provider,
+                _defaultMaxTokens,
+                cancellationToken);
 
-            // Call LLM provider
+            // Add context window state to trace
+            activity?.SetTag("context.estimated_tokens", managedContext.EstimatedTokens);
+            activity?.SetTag("context.max_tokens", managedContext.MaxContextTokens);
+            activity?.SetTag("context.available_tokens", managedContext.AvailableTokens);
+            activity?.SetTag("context.utilization", managedContext.Utilization);
+            activity?.SetTag("context.was_truncated", managedContext.WasTruncated);
+            
+            if (managedContext.WasTruncated)
+            {
+                activity?.SetTag("context.messages_removed", managedContext.MessagesRemoved);
+                _logger.LogWarning("Context window truncated: removed {MessagesRemoved} messages, " +
+                    "utilization {Utilization:P0}, estimated {EstimatedTokens} of {MaxTokens} tokens",
+                    managedContext.MessagesRemoved,
+                    managedContext.Utilization,
+                    managedContext.EstimatedTokens,
+                    managedContext.MaxContextTokens);
+            }
+            else
+            {
+                _logger.LogDebug("Context window: {EstimatedTokens} of {MaxTokens} tokens ({Utilization:P0})",
+                    managedContext.EstimatedTokens,
+                    managedContext.MaxContextTokens,
+                    managedContext.Utilization);
+            }
+
+            // Call LLM provider with managed context
             var assistantMessage = await _provider.CompleteAsync(
-                allMessages,
+                managedContext.Messages,
                 cancellationToken,
                 _defaultTemperature,
                 _defaultMaxTokens);
@@ -156,6 +186,16 @@ public class Agent
             
             _currentConversation.Metadata["lastUpdated"] = DateTimeOffset.UtcNow;
             _currentConversation.Metadata["messageCount"] = _currentConversation.Messages.Count;
+            
+            // Track context window stats
+            _currentConversation.Metadata["contextEstimatedTokens"] = managedContext.EstimatedTokens;
+            _currentConversation.Metadata["contextUtilization"] = managedContext.Utilization;
+            _currentConversation.Metadata["contextWasTruncated"] = managedContext.WasTruncated;
+            if (managedContext.WasTruncated)
+            {
+                var totalTruncated = Convert.ToInt32(_currentConversation.Metadata.GetValueOrDefault("totalMessagesTruncated", 0)) + managedContext.MessagesRemoved;
+                _currentConversation.Metadata["totalMessagesTruncated"] = totalTruncated;
+            }
             
             // Track cumulative token usage at conversation level
             if (inputTokens > 0 || outputTokens > 0)

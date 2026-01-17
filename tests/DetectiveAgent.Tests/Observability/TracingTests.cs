@@ -1,4 +1,5 @@
 using System.Diagnostics;
+using DetectiveAgent.Context;
 using DetectiveAgent.Core;
 using DetectiveAgent.Observability;
 using DetectiveAgent.Providers;
@@ -59,13 +60,20 @@ public class TracingTests
 
         mockProvider.Setup(p => p.GetCapabilities())
             .Returns(new ProviderCapabilities(true, true, true, 200_000));
+        
+        mockProvider.Setup(p => p.EstimateTokensAsync(
+            It.IsAny<IReadOnlyList<Message>>(),
+            It.IsAny<CancellationToken>()))
+            .ReturnsAsync(100);
 
         var mockStore = new Mock<IConversationStore>();
         mockStore.Setup(s => s.SaveAsync(It.IsAny<Conversation>(), It.IsAny<CancellationToken>()))
             .Returns(Task.CompletedTask);
 
         var mockLogger = new Mock<ILogger<Agent>>();
-        var agent = new Agent(mockProvider.Object, mockStore.Object, mockLogger.Object);
+        var contextManager = new ContextWindowManager();
+        
+        var agent = new Agent(mockProvider.Object, mockStore.Object, mockLogger.Object, contextManager);
 
         // Act
         var response = await agent.SendMessageAsync("Hello");
@@ -182,9 +190,10 @@ public class TracingTests
 
         var mockStore = new Mock<IConversationStore>();
         var mockLogger = new Mock<ILogger<Agent>>();
+        var contextManager = new ContextWindowManager();
         
         // Act
-        var agent = new Agent(mockProvider.Object, mockStore.Object, mockLogger.Object);
+        var agent = new Agent(mockProvider.Object, mockStore.Object, mockLogger.Object, contextManager);
         
         // With lazy initialization, no conversation exists until StartNewConversation is called
         Assert.Null(agent.GetCurrentConversationId());

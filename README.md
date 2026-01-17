@@ -2,9 +2,11 @@
 
 A foundational LLM agent built from first principles for release risk assessment. This implementation follows a transparent, observable, and extensible architecture.
 
-## Current Status: Step 1 Complete ✅
+## Current Status: Steps 1-3 Complete ✅
 
-**Step 1: Say Hello to Your Agent (Basic Conversation)** has been successfully implemented with all acceptance criteria met.
+**Step 1: Basic Conversation** ✅ - Conversation with LLM, history, and persistence  
+**Step 2: Observability** ✅ - OpenTelemetry tracing with spans and trace export  
+**Step 3: Context Window Management** ✅ - Token estimation and automatic truncation
 
 ## What's Implemented
 
@@ -12,19 +14,27 @@ A foundational LLM agent built from first principles for release risk assessment
 - **Message & Conversation Models**: Immutable C# records for clean data modeling
 - **Provider Abstraction**: `ILlmProvider` interface enabling multi-provider support
 - **Anthropic Provider**: Full implementation of Claude 3.5 Sonnet integration
+- **Ollama Provider**: Local LLM support via Ollama API
 - **Agent Core**: Orchestrates conversation with LLM, maintains state
+- **Context Window Manager**: Automatic truncation when approaching token limits
 - **File System Storage**: Persistent conversation storage as JSON
+- **OpenTelemetry Observability**: Full tracing with spans exported to filesystem
 - **CLI Application**: Interactive terminal interface for testing
 
 ### Features
-- ✅ Back-and-forth conversation with Claude
+- ✅ Back-and-forth conversation with Claude or Ollama
 - ✅ Conversation history maintained in memory
-- ✅ Persistent storage to filesystem
+- ✅ Persistent storage to filesystem with trace IDs
 - ✅ Load and continue previous conversations
 - ✅ Multiple conversation management
-- ✅ Provider abstraction for future providers
+- ✅ Provider abstraction (Anthropic, Ollama)
+- ✅ **Context window management** with automatic truncation
+- ✅ **OpenTelemetry tracing** - all operations captured as spans
+- ✅ **Trace export to JSON files** for analysis
+- ✅ **Token counting and budget allocation**
+- ✅ Context utilization tracking in traces and metadata
 - ✅ Comprehensive error handling
-- ✅ 7 automated xUnit tests (all passing)
+- ✅ 17/18 automated xUnit tests passing
 
 ## Quick Start
 
@@ -71,7 +81,13 @@ DetectiveAgent/
 │   ├── Providers/
 │   │   ├── ILlmProvider.cs          # Provider interface
 │   │   ├── AnthropicProvider.cs     # Claude implementation
+│   │   ├── OllamaProvider.cs        # Ollama implementation
 │   │   └── ProviderExceptions.cs    # Custom exceptions
+│   ├── Context/
+│   │   └── ContextWindowManager.cs  # Context window management
+│   ├── Observability/
+│   │   ├── AgentActivitySource.cs   # OpenTelemetry source
+│   │   └── FileSystemTraceExporter.cs # Trace export
 │   └── Storage/
 │       ├── IConversationStore.cs    # Storage interface
 │       └── FileSystemConversationStore.cs
@@ -121,17 +137,7 @@ This agent is built with:
 
 ## Next Steps
 
-### Step 2: Observability (Traces and Spans)
-- Add OpenTelemetry instrumentation
-- Capture timing, token counts, and operation flow
-- Export traces to filesystem
-
-### Step 3: Context Window Management
-- Token counting and estimation
-- Conversation truncation strategies
-- Context budget allocation
-
-### Step 4: Retry Mechanism
+### Step 4: Retry Mechanism (Next)
 - Exponential backoff for transient failures
 - Rate limit handling
 - Network error recovery
@@ -180,8 +186,13 @@ Current test coverage:
 - Agent initialization and conversation management
 - Message sending and response handling
 - Conversation history maintenance
-- Persistence (save/load)
+- Persistence (save/load) with trace IDs
 - Multiple conversation handling
+- OpenTelemetry activity creation and tagging
+- Trace export to filesystem
+- Context window management and truncation
+- Token estimation and budget allocation
+- Context utilization tracking
 
 ## Configuration
 
@@ -191,16 +202,22 @@ Configure via `appsettings.json`:
   "Agent": {
     "SystemPrompt": "You are a helpful AI assistant.",
     "Temperature": 0.7,
-    "MaxTokens": 4096
+    "MaxTokens": 4096,
+    "DefaultProvider": "Ollama"
   },
   "Providers": {
     "Anthropic": {
       "ApiKey": "env:ANTHROPIC_API_KEY",
       "Model": "claude-3-5-sonnet-20241022"
+    },
+    "Ollama": {
+      "Model": "llama2",
+      "BaseUrl": "http://localhost:11434"
     }
   },
   "Storage": {
-    "ConversationsPath": "./data/conversations"
+    "ConversationsPath": "./data/conversations",
+    "TracesPath": "./data/traces"
   }
 }
 ```

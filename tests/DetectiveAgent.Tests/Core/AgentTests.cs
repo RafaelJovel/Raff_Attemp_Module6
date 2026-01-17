@@ -1,5 +1,6 @@
 namespace DetectiveAgent.Tests.Core;
 
+using DetectiveAgent.Context;
 using DetectiveAgent.Core;
 using DetectiveAgent.Providers;
 using DetectiveAgent.Storage;
@@ -12,12 +13,23 @@ public class AgentTests
     private readonly Mock<ILlmProvider> _mockProvider;
     private readonly Mock<IConversationStore> _mockStore;
     private readonly Mock<ILogger<Agent>> _mockLogger;
+    private readonly ContextWindowManager _contextManager;
 
     public AgentTests()
     {
         _mockProvider = new Mock<ILlmProvider>();
         _mockStore = new Mock<IConversationStore>();
         _mockLogger = new Mock<ILogger<Agent>>();
+        _contextManager = new ContextWindowManager();
+        
+        // Setup default provider behavior for context management
+        _mockProvider.Setup(p => p.GetCapabilities())
+            .Returns(new ProviderCapabilities(false, false, false, MaxContextTokens: 10000));
+        
+        _mockProvider.Setup(p => p.EstimateTokensAsync(
+            It.IsAny<IReadOnlyList<Message>>(),
+            It.IsAny<CancellationToken>()))
+            .ReturnsAsync(100); // Simple token estimation
     }
 
     [Fact]
@@ -45,7 +57,8 @@ public class AgentTests
         var agent = new Agent(
             _mockProvider.Object,
             _mockStore.Object,
-            _mockLogger.Object);
+            _mockLogger.Object,
+            _contextManager);
 
         // Act
         var result = await agent.SendMessageAsync("Hi there!");
@@ -91,7 +104,8 @@ public class AgentTests
         var agent = new Agent(
             _mockProvider.Object,
             _mockStore.Object,
-            _mockLogger.Object);
+            _mockLogger.Object,
+            _contextManager);
 
         // Act
         await agent.SendMessageAsync("Message 1");
@@ -116,7 +130,8 @@ public class AgentTests
         var agent = new Agent(
             _mockProvider.Object,
             _mockStore.Object,
-            _mockLogger.Object);
+            _mockLogger.Object,
+            _contextManager);
 
         // Clear the initial conversation
         agent.StartNewConversation();
@@ -152,7 +167,8 @@ public class AgentTests
         var agent = new Agent(
             _mockProvider.Object,
             _mockStore.Object,
-            _mockLogger.Object);
+            _mockLogger.Object,
+            _contextManager);
 
         // Act
         var loaded = await agent.LoadConversationAsync(conversationId);
@@ -177,7 +193,8 @@ public class AgentTests
         var agent = new Agent(
             _mockProvider.Object,
             _mockStore.Object,
-            _mockLogger.Object);
+            _mockLogger.Object,
+            _contextManager);
 
         // Act
         var loaded = await agent.LoadConversationAsync(conversationId);
@@ -193,7 +210,8 @@ public class AgentTests
         var agent = new Agent(
             _mockProvider.Object,
             _mockStore.Object,
-            _mockLogger.Object);
+            _mockLogger.Object,
+            _contextManager);
 
         // No conversation exists initially (lazy initialization)
         Assert.Null(agent.GetCurrentConversationId());

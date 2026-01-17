@@ -1,4 +1,5 @@
 ﻿using System.Diagnostics;
+using DetectiveAgent.Context;
 using DetectiveAgent.Core;
 using DetectiveAgent.Observability;
 using DetectiveAgent.Providers;
@@ -106,13 +107,17 @@ builder.Services.AddSingleton<IConversationStore>(sp =>
     return new FileSystemConversationStore(logger, conversationsPath);
 });
 
+// Register context window manager
+builder.Services.AddSingleton<ContextWindowManager>();
+
 // Register agent
 builder.Services.AddSingleton(sp =>
 {
     var provider = sp.GetRequiredService<ILlmProvider>();
     var store = sp.GetRequiredService<IConversationStore>();
     var logger = sp.GetRequiredService<ILogger<Agent>>();
-    return new Agent(provider, store, logger, systemPrompt, temperature, maxTokens);
+    var contextManager = sp.GetRequiredService<ContextWindowManager>();
+    return new Agent(provider, store, logger, contextManager, systemPrompt, temperature, maxTokens);
 });
 
 var host = builder.Build();
