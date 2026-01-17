@@ -1,0 +1,38 @@
+{
+    "v2.1.0": {
+        "version": "v2.1.0",
+        "changes": ["Added payment processing", "Fixed authentication bug"],
+        "tests": {"passed": "142", "failed": "2", "skipped": "5"},
+        "deployment_metrics": {
+            "error_rate": "0.02",
+            "response_time_p95": "450"
+        }
+    },
+    "v3.0.0": {
+        "version": "v3.0.0",
+        "changes": ["Payment processing rewrite", "Database migration"],
+        "tests": {"passed": "120", "failed": "8", "skipped": "2"},
+        "deployment_metrics": {
+            "error_rate": "0.03",
+            "response_time_p95": "500"
+        }
+    },
+    "v2.2.0": {
+        "version": "v2.2.0",
+        "changes": ["API endpoint updates"],
+        "tests": {"passed": "145", "failed": "1", "skipped": "4"},
+        "deployment_metrics": {
+            "error_rate": "0.04",
+            "response_time_p95": "420"
+        }
+    },
+    "v2.1.1": {
+        "version": "v2.1.1",
+        "changes": ["Documentation updates", "Minor bug fix"],
+        "tests": {"passed": "150", "failed": "0", "skipped": "0"},
+        "deployment_metrics": {
+            "error_rate": "0.01",
+            "response_time_p95": "380"
+        }
+    }
+}
