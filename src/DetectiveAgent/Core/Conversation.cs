@@ -10,4 +10,10 @@ public record Conversation
     public required List<Message> Messages { get; init; }
     public required DateTimeOffset CreatedAt { get; init; }
     public Dictionary<string, object>? Metadata { get; init; }
+    
+    /// <summary>
+    /// The OpenTelemetry trace ID associated with this conversation.
+    /// Used to correlate conversation data with trace files.
+    /// </summary>
+    public string? TraceId { get; init; }
 }

@@ -1,9 +1,11 @@
 namespace DetectiveAgent.Providers;
 
+using System.Diagnostics;
 using System.Net.Http.Json;
 using System.Text.Json;
 using System.Text.Json.Serialization;
 using DetectiveAgent.Core;
+using DetectiveAgent.Observability;
 using Microsoft.Extensions.Logging;
 
 /// <summary>
@@ -41,6 +43,16 @@ public class AnthropicProvider : ILlmProvider
         float? temperature = null,
         int? maxTokens = null)
     {
+        using var activity = AgentActivitySource.Instance.StartActivity(
+            "Provider.Complete",
+            ActivityKind.Client);
+
+        activity?.SetTag("provider", "Anthropic");
+        activity?.SetTag("model", _model);
+        activity?.SetTag("temperature", temperature ?? 0.7f);
+        activity?.SetTag("max_tokens", maxTokens ?? 4096);
+        activity?.SetTag("message_count", messages.Count);
+
         try
         {
             // Separate system message from conversation messages
@@ -77,6 +89,8 @@ public class AnthropicProvider : ILlmProvider
                 var errorContent = await response.Content.ReadAsStringAsync(cancellationToken);
                 _logger.LogError("Anthropic API error: {StatusCode} - {Content}", response.StatusCode, errorContent);
 
+                activity?.SetStatus(ActivityStatusCode.Error, $"HTTP {response.StatusCode}");
+
                 throw response.StatusCode switch
                 {
                     System.Net.HttpStatusCode.Unauthorized or System.Net.HttpStatusCode.Forbidden =>
@@ -93,21 +107,32 @@ public class AnthropicProvider : ILlmProvider
 
             if (anthropicResponse == null || anthropicResponse.Content.Count == 0)
             {
+                activity?.SetStatus(ActivityStatusCode.Error, "Empty response");
                 throw new LlmProviderException("Empty response from Anthropic API");
             }
 
             var messageContent = anthropicResponse.Content[0].Text;
+            
+            // Add token usage to trace
+            activity?.SetTag("inputTokens", anthropicResponse.Usage.InputTokens);
+            activity?.SetTag("outputTokens", anthropicResponse.Usage.OutputTokens);
+            activity?.SetTag("totalTokens", anthropicResponse.Usage.InputTokens + anthropicResponse.Usage.OutputTokens);
+            activity?.SetTag("stop_reason", anthropicResponse.StopReason ?? "unknown");
+            
             var metadata = new Dictionary<string, object>
             {
                 ["model"] = _model,
-                ["input_tokens"] = anthropicResponse.Usage.InputTokens,
-                ["output_tokens"] = anthropicResponse.Usage.OutputTokens,
+                ["inputTokens"] = anthropicResponse.Usage.InputTokens,
+                ["outputTokens"] = anthropicResponse.Usage.OutputTokens,
+                ["totalTokens"] = anthropicResponse.Usage.InputTokens + anthropicResponse.Usage.OutputTokens,
                 ["stop_reason"] = anthropicResponse.StopReason ?? "unknown"
             };
 
             _logger.LogInformation("Received response from Anthropic: {InputTokens} input tokens, {OutputTokens} output tokens",
                 anthropicResponse.Usage.InputTokens, anthropicResponse.Usage.OutputTokens);
 
+            activity?.SetStatus(ActivityStatusCode.Ok);
+            
             return new Message(
                 MessageRole.Assistant,
                 messageContent,
@@ -117,7 +142,13 @@ public class AnthropicProvider : ILlmProvider
         catch (HttpRequestException ex)
         {
             _logger.LogError(ex, "Network error communicating with Anthropic API");
+            activity?.SetStatus(ActivityStatusCode.Error, ex.Message);
             throw new NetworkException("Network error communicating with Anthropic API", ex);
+        }
+        catch (Exception ex)
+        {
+            activity?.SetStatus(ActivityStatusCode.Error, ex.Message);
+            throw;
         }
     }
 

@@ -1,5 +1,7 @@
 namespace DetectiveAgent.Core;
 
+using System.Diagnostics;
+using DetectiveAgent.Observability;
 using DetectiveAgent.Providers;
 using DetectiveAgent.Storage;
 using Microsoft.Extensions.Logging;
@@ -41,6 +43,10 @@ public class Agent
         string content,
         CancellationToken cancellationToken = default)
     {
+        using var activity = AgentActivitySource.Instance.StartActivity(
+            "Agent.SendMessage",
+            ActivityKind.Internal);
+
         if (string.IsNullOrWhiteSpace(content))
         {
             throw new ArgumentException("Message content cannot be empty", nameof(content));
@@ -50,6 +56,11 @@ public class Agent
         {
             throw new InvalidOperationException("No active conversation");
         }
+
+        // Add trace tags
+        activity?.SetTag("conversation.id", _currentConversation.Id);
+        activity?.SetTag("message.length", content.Length);
+        activity?.SetTag("message.count", _currentConversation.Messages.Count);
 
         _logger.LogInformation("Sending user message: {MessagePreview}...", 
             content.Length > 50 ? content.Substring(0, 50) : content);
@@ -81,6 +92,25 @@ public class Agent
             // Add assistant response to conversation
             _currentConversation.Messages.Add(assistantMessage);
 
+            // Extract token information from metadata
+            if (assistantMessage.Metadata != null)
+            {
+                if (assistantMessage.Metadata.TryGetValue("inputTokens", out var inputTokens))
+                {
+                    activity?.SetTag("tokens.input", inputTokens);
+                }
+                if (assistantMessage.Metadata.TryGetValue("outputTokens", out var outputTokens))
+                {
+                    activity?.SetTag("tokens.output", outputTokens);
+                }
+                if (assistantMessage.Metadata.TryGetValue("totalTokens", out var totalTokens))
+                {
+                    activity?.SetTag("tokens.total", totalTokens);
+                }
+            }
+
+            activity?.SetTag("response.length", assistantMessage.Content.Length);
+
             // Update metadata
             if (_currentConversation.Metadata == null)
             {
@@ -101,11 +131,13 @@ public class Agent
                     ? assistantMessage.Content.Substring(0, 50) 
                     : assistantMessage.Content);
 
+            activity?.SetStatus(ActivityStatusCode.Ok);
             return assistantMessage;
         }
         catch (Exception ex)
         {
             _logger.LogError(ex, "Error during message exchange");
+            activity?.SetStatus(ActivityStatusCode.Error, ex.Message);
             throw;
         }
     }
@@ -116,6 +148,7 @@ public class Agent
     public void StartNewConversation(string? systemPrompt = null)
     {
         var conversationId = Guid.NewGuid().ToString();
+        var traceId = Activity.Current?.TraceId.ToString();
         
         _currentConversation = new Conversation
         {
@@ -123,6 +156,7 @@ public class Agent
             SystemPrompt = systemPrompt ?? "You are a helpful AI assistant.",
             Messages = new List<Message>(),
             CreatedAt = DateTimeOffset.UtcNow,
+            TraceId = traceId,
             Metadata = new Dictionary<string, object>
             {
                 ["provider"] = _provider.GetType().Name,
@@ -130,7 +164,8 @@ public class Agent
             }
         };
 
-        _logger.LogInformation("Started new conversation {ConversationId}", conversationId);
+        _logger.LogInformation("Started new conversation {ConversationId} with trace {TraceId}", 
+            conversationId, traceId ?? "none");
     }
 
     /// <summary>

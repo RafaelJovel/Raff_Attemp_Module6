@@ -1,10 +1,14 @@
-﻿using DetectiveAgent.Core;
+﻿using System.Diagnostics;
+using DetectiveAgent.Core;
+using DetectiveAgent.Observability;
 using DetectiveAgent.Providers;
 using DetectiveAgent.Storage;
 using Microsoft.Extensions.Configuration;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Hosting;
 using Microsoft.Extensions.Logging;
+using OpenTelemetry.Resources;
+using OpenTelemetry.Trace;
 
 // Build configuration
 var configuration = new ConfigurationBuilder()
@@ -20,6 +24,22 @@ var builder = Host.CreateApplicationBuilder(args);
 // Configure logging
 builder.Logging.ClearProviders();
 builder.Logging.AddConsole();
+
+// Configure OpenTelemetry
+var tracesPath = configuration["Storage:TracesPath"] ?? "./data/traces";
+builder.Services.AddOpenTelemetry()
+    .ConfigureResource(resource => resource
+        .AddService("DetectiveAgent", serviceVersion: "1.0.0"))
+    .WithTracing(tracing => tracing
+        .AddSource(AgentActivitySource.SourceName)
+        .AddHttpClientInstrumentation(options =>
+        {
+            options.RecordException = true;
+        })
+        .AddProcessor(new OpenTelemetry.SimpleActivityExportProcessor(
+            new FileSystemTraceExporter(tracesPath))));
+
+Console.WriteLine($"Tracing enabled. Traces will be saved to: {tracesPath}");
 
 // Register services
 var conversationsPath = configuration["Storage:ConversationsPath"] ?? "./data/conversations";
@@ -96,6 +116,9 @@ builder.Services.AddSingleton(sp =>
 });
 
 var host = builder.Build();
+
+// Start the host to ensure OpenTelemetry is initialized
+await host.StartAsync();
 
 // Run the CLI
 var agent = host.Services.GetRequiredService<Agent>();
@@ -212,3 +235,7 @@ while (true)
         Console.WriteLine();
     }
 }
+
+// Properly shutdown host to flush traces
+await host.StopAsync();
+await host.WaitForShutdownAsync();
