@@ -2,11 +2,13 @@
 
 A foundational LLM agent built from first principles for release risk assessment. This implementation follows a transparent, observable, and extensible architecture.
 
-## Current Status: Steps 1-3 Complete ✅
+## Current Status: Steps 1-5 Complete ✅
 
 **Step 1: Basic Conversation** ✅ - Conversation with LLM, history, and persistence  
 **Step 2: Observability** ✅ - OpenTelemetry tracing with spans and trace export  
-**Step 3: Context Window Management** ✅ - Token estimation and automatic truncation
+**Step 3: Context Window Management** ✅ - Token estimation and automatic truncation  
+**Step 4: Retry Mechanism** ✅ - Exponential backoff with Polly for transient failures  
+**Step 5: System Prompt Engineering** ✅ - Enhanced Detective Agent prompts with multiple configurations
 
 ## What's Implemented
 
@@ -33,8 +35,12 @@ A foundational LLM agent built from first principles for release risk assessment
 - ✅ **Trace export to JSON files** for analysis
 - ✅ **Token counting and budget allocation**
 - ✅ Context utilization tracking in traces and metadata
+- ✅ **Retry mechanism with exponential backoff** using Polly
+- ✅ **Rate limit handling** (429) and transient error recovery
+- ✅ **Enhanced system prompts** for Detective Agent personality
+- ✅ **Configurable prompts** via appsettings.json (Production, Development, Audit, Research modes)
 - ✅ Comprehensive error handling
-- ✅ 17/18 automated xUnit tests passing
+- ✅ **32+ automated xUnit tests passing** (includes SystemPromptTests)
 
 ## Quick Start
 
@@ -85,6 +91,9 @@ DetectiveAgent/
 │   │   └── ProviderExceptions.cs    # Custom exceptions
 │   ├── Context/
 │   │   └── ContextWindowManager.cs  # Context window management
+│   ├── Retry/
+│   │   ├── PollyRetryPolicy.cs      # Retry policy implementation
+│   │   └── RetryConfiguration.cs    # Retry settings
 │   ├── Observability/
 │   │   ├── AgentActivitySource.cs   # OpenTelemetry source
 │   │   └── FileSystemTraceExporter.cs # Trace export
@@ -93,7 +102,10 @@ DetectiveAgent/
 │       └── FileSystemConversationStore.cs
 ├── samples/DetectiveAgent.Cli/      # CLI application
 │   ├── Program.cs                   # Main CLI logic
-│   └── appsettings.json             # Configuration
+│   ├── appsettings.json             # Production configuration
+│   ├── appsettings.Development.json # Development prompt (friendly)
+│   ├── appsettings.Audit.json       # Audit mode (strict)
+│   └── appsettings.Research.json    # Research mode (exploratory)
 ├── tests/DetectiveAgent.Tests/      # Unit tests
 │   └── Core/AgentTests.cs           # Agent tests
 ├── memory/                          # Design documents
@@ -137,17 +149,7 @@ This agent is built with:
 
 ## Next Steps
 
-### Step 4: Retry Mechanism (Next)
-- Exponential backoff for transient failures
-- Rate limit handling
-- Network error recovery
-
-### Step 5: System Prompt Engineering
-- Enhanced agent personality
-- Tool usage instructions
-- Capability awareness
-
-### Step 6: Tool Abstraction
+### Step 6: Tool Abstraction (Next)
 - Tool calling framework
 - Get Release Summary tool
 - File Risk Report tool
@@ -200,27 +202,45 @@ Configure via `appsettings.json`:
 ```json
 {
   "Agent": {
-    "SystemPrompt": "You are a helpful AI assistant.",
+    "SystemPrompt": "You are a Detective Agent specializing in software release risk assessment...",
     "Temperature": 0.7,
-    "MaxTokens": 4096,
+    "MaxTokens": 2048,
     "DefaultProvider": "Ollama"
   },
   "Providers": {
     "Anthropic": {
-      "ApiKey": "env:ANTHROPIC_API_KEY",
-      "Model": "claude-3-5-sonnet-20241022"
+      "ApiKey": "your-api-key-here",
+      "Model": "claude-3-haiku-20240307"
     },
     "Ollama": {
-      "Model": "llama2",
+      "Model": "qwen2.5:0.5b",
       "BaseUrl": "http://localhost:11434"
     }
   },
   "Storage": {
     "ConversationsPath": "./data/conversations",
     "TracesPath": "./data/traces"
+  },
+  "Retry": {
+    "MaxAttempts": 3,
+    "InitialDelayMs": 1000,
+    "MaxDelayMs": 60000,
+    "BackoffFactor": 2.0,
+    "UseJitter": true
   }
 }
 ```
+
+### System Prompt Configurations
+
+The Detective Agent includes multiple prompt configurations for different use cases:
+
+- **Production** (`appsettings.json`): Direct, thorough risk assessment specialist
+- **Development** (`appsettings.Development.json`): Friendly, collaborative feedback mode
+- **Audit** (`appsettings.Audit.json`): Strict, conservative risk classification
+- **Research** (`appsettings.Research.json`): Exploratory pattern analysis mode
+
+See [STEP5-PROMPT-ENGINEERING.md](STEP5-PROMPT-ENGINEERING.md) for detailed prompt engineering guide.
 
 ## Contributing
 
@@ -236,3 +256,5 @@ Educational project - see design documentation for details.
 - [Implementation Plan](memory/PLAN.md) - .NET-specific implementation details
 - [Implementation Steps](memory/STEPS.md) - Step-by-step guide
 - [Quick Start Guide](quick-start.md) - Manual testing instructions
+- [Step 4: Retry Implementation](STEP4-RETRY-IMPLEMENTATION.md) - Retry mechanism details
+- [Step 5: Prompt Engineering](STEP5-PROMPT-ENGINEERING.md) - System prompt guide
