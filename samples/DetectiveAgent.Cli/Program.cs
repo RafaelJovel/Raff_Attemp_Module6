@@ -10,6 +10,7 @@ using Microsoft.Extensions.Logging;
 var configuration = new ConfigurationBuilder()
     .SetBasePath(AppContext.BaseDirectory)
     .AddJsonFile("appsettings.json", optional: false)
+    .AddJsonFile("appsettings.Development.json", optional: true)  // Load development overrides
     .AddEnvironmentVariables()
     .Build();
 

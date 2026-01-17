@@ -30,18 +30,32 @@ A foundational LLM agent built from first principles for release risk assessment
 
 See [quick-start.md](quick-start.md) for detailed setup and testing instructions.
 
+### 🔐 Important: API Key Security
+
+**Before running the application**, you need to configure your Anthropic API key securely:
+
+**Recommended:** Use `appsettings.Development.json` (already created with your key)
+```bash
+# Your key is already in appsettings.Development.json
+# This file is gitignored and won't be committed
+dotnet run --project samples/DetectiveAgent.Cli
+```
+
+See **[API-KEYS.md](API-KEYS.md)** for complete security guide including:
+- ✅ How to keep API keys secure
+- ✅ Multiple configuration options
+- ✅ What's protected by .gitignore
+- ✅ Production deployment strategies
+
 **Quick Test:**
 ```bash
-# 1. Set your API key
-$env:ANTHROPIC_API_KEY="your-key-here"
-
-# 2. Build
+# 1. Build
 dotnet build
 
-# 3. Run tests
+# 2. Run tests
 dotnet test
 
-# 4. Run CLI
+# 3. Run CLI (your API key is already configured)
 dotnet run --project samples/DetectiveAgent.Cli
 ```
 
