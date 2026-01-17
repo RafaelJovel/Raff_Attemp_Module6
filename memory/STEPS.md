@@ -1,91 +1,120 @@
-# Detective Agent Design Specification
+# Detective Agent Implementation Steps (.NET)
 
 ## Recommended Order of Implementation
 
-This section outlines an incremental, iterative approach to building the agent. Each step builds on the previous one with clear acceptance criteria.
+This section outlines an incremental, iterative approach to building the agent using .NET and C#. Each step builds on the previous one with clear acceptance criteria.
 
 ### Step 0: Create Implementation Plan
-**Goal:** Translate the design document into a concrete implementation plan based on the steps defined in this document.
+**Goal:** Translate the design document into a concrete .NET implementation plan based on the steps defined in this document.
 
 **Tasks:**
 - Review the entire design specification
 - Break down each component into implementable tasks
 - Identify dependencies between components
-- Define file structure and module organization
+- Define .NET solution structure and project organization
 - Create a detailed implementation plan document
 
 **Acceptance Criteria:**
-- Implementation plan document exists
+- Implementation plan document exists (PLAN.md)
 - All components from design are represented in plan
 - Dependencies are clearly identified
-- File structure is defined
+- .NET solution structure is defined
 - Plan includes specific tasks with clear deliverables
+- NuGet packages and dependencies identified
 
 ### Step 1: Say Hello to Your Agent (Basic Conversation)
 **Goal:** Build a minimal working agent that can have a conversation
 
 **Components:**
-- Configuration system (API keys, model selection)
-- Message and Conversation data models
-- Provider abstraction interface
-- Provider implementation (Anthropic, OpenRouter, OpenAI, Ollama, etc)
+- .NET solution and project structure (DetectiveAgent.sln)
+- Configuration system using appsettings.json and IConfiguration
+- Message and Conversation data models (using C# records)
+- Provider abstraction interface (ILlmProvider)
+- Provider implementation (AnthropicProvider, OpenRouterProvider, or OllamaProvider)
 - Agent core with conversation loop (no tool loop yet)
-- Filesystem-based conversation persistence
-- Simple CLI for testing
-- Basic automated tests
+- Filesystem-based conversation persistence using System.Text.Json
+- Simple CLI application for testing
+- Basic xUnit tests
 
 **Capabilities:**
-- Have a back-and-forth conversation with the provider model
+- Have a back-and-forth conversation with the LLM provider
 - Conversation history maintained in memory and persisted to filesystem
 - Can continue conversations across CLI sessions
-- Provider abstraction layer exists (even though only one is implemented)
+- Provider abstraction layer exists (even though only one provider is implemented)
 
 **Acceptance Criteria:**
-- CLI starts and connects to provider model
+- CLI application starts and connects to LLM provider
 - User can send messages and receive responses
 - Conversation history is maintained in memory during session
-- Each conversation is saved to filesystem as JSON
+- Each conversation is saved to filesystem as JSON using System.Text.Json
 - Can load and continue previous conversations from filesystem
 - Conversation includes all messages with timestamps
-- Basic error handling for API failures
-- At least 3 automated tests covering core functionality
-- Provider abstraction interface is defined and is implemented
+- Basic error handling for API failures using custom exception types
+- At least 3 automated xUnit tests covering core functionality
+- Provider abstraction interface (ILlmProvider) is defined and implemented
+- Dependency injection configured using Microsoft.Extensions.DependencyInjection
+- Configuration loaded from appsettings.json
+
+**Key .NET Commands:**
+```bash
+dotnet new sln -n DetectiveAgent
+dotnet new classlib -n DetectiveAgent -o src/DetectiveAgent
+dotnet new console -n DetectiveAgent.Cli -o samples/DetectiveAgent.Cli
+dotnet new xunit -n DetectiveAgent.Tests -o tests/DetectiveAgent.Tests
+dotnet sln add src/DetectiveAgent tests/DetectiveAgent.Tests samples/DetectiveAgent.Cli
+dotnet build
+dotnet test
+dotnet run --project samples/DetectiveAgent.Cli
+```
 
 ### Step 2: Observability (Traces and Spans)
 **Goal:** Add complete OpenTelemetry visibility into agent operations
 
 **Components:**
-- OpenTelemetry data structures
-- Instrumentation for agent operations
+- OpenTelemetry .NET SDK packages
+- ActivitySource for creating traces and spans
+- Instrumentation for agent operations using Activity API
 - Instrumentation for provider calls
 - Filesystem-based trace export (JSON files)
 - Trace context propagation through conversation
+- HTTP client instrumentation (auto-instrumented via OpenTelemetry.Instrumentation.Http)
 
 **Capabilities:**
 - Every conversation generates a trace
-- Agent operations captured as spans (send_message, provider calls)
+- Agent operations captured as spans (SendMessageAsync, provider calls)
 - Traces include timing, token counts, model info
 - All traces saved to filesystem as JSON
 - Trace IDs link conversations to their traces
+- HTTP requests automatically instrumented
 
 **Acceptance Criteria:**
-- Each conversation has a unique trace ID
-- Traces saved to filesystem in structured JSON format
-- Spans capture: operation name, duration, start/end times
+- Each conversation has a unique trace ID (Activity.TraceId)
+- Traces saved to filesystem in OpenTelemetry JSON format
+- Spans capture: operation name, duration, start/end times using Activity
 - Provider call spans include: model, tokens (input/output), duration
 - Conversation spans include: message count, total tokens
 - Trace files are human-readable and well-organized
 - Can correlate conversation JSON with its trace JSON via trace ID
 - Automated tests verify trace generation
+- OpenTelemetry configured in dependency injection
+- ActivitySource registered as singleton
+
+**Key NuGet Packages:**
+- OpenTelemetry
+- OpenTelemetry.Exporter.Console
+- OpenTelemetry.Exporter.OpenTelemetryProtocol
+- OpenTelemetry.Instrumentation.Http
+- OpenTelemetry.Extensions.Hosting
 
 ### Step 3: Context Window Management
 **Goal:** Handle conversations that exceed model token limits
 
 **Components:**
-- Token counting/estimation
+- Token counting/estimation (using provider-specific tokenizers or approximations)
 - Truncation strategy implementation
 - Token budget allocation (system prompt, history, response, buffer)
 - Context management integration into agent core
+- ContextWindowManager class
 
 **Capabilities:**
 - Estimate token count for conversation history
@@ -99,22 +128,23 @@ This section outlines an incremental, iterative approach to building the agent. 
 - Conversation truncates when within 90% of token limit
 - System prompt always preserved
 - Most recent N messages preserved
-- Context window state visible in traces
+- Context window state visible in traces (using Activity.SetTag)
 - Long conversations don't cause API errors
 - Automated tests verify truncation behavior
+- Token estimation configurable per provider
 
 ### Step 4: Retry Mechanism
 **Goal:** Handle transient failures gracefully
 
 **Components:**
-- Retry configuration (max attempts, delays, backoff)
-- Exponential backoff with jitter
-- Retry logic for provider calls
-- Error classification (retryable vs non-retryable)
+- Retry configuration (using IOptions<RetryConfiguration>)
+- Exponential backoff with jitter implementation
+- Retry logic for provider calls using Microsoft.Extensions.Http.Resilience or Polly
+- Error classification (retryable vs non-retryable using custom exception types)
 - Retry tracking in traces
 
 **Capabilities:**
-- Automatic retry for rate limits (429)
+- Automatic retry for rate limits (429) using RateLimitException
 - Automatic retry for network errors
 - Automatic retry for temporary server errors (500, 502, 503)
 - Exponential backoff between attempts
@@ -124,12 +154,16 @@ This section outlines an incremental, iterative approach to building the agent. 
 **Acceptance Criteria:**
 - Rate limit errors trigger retries
 - Retries use exponential backoff
-- Max retry attempts configurable
+- Max retry attempts configurable via appsettings.json
 - Jitter added to prevent thundering herd
-- Auth/validation errors fail immediately
+- Auth/validation errors fail immediately (AuthenticationException)
 - Retry attempts tracked in traces with timing
-- Automated tests verify retry behavior
+- Automated tests verify retry behavior using WireMock.Net
 - Manual test of rate limit handling
+- Resilience pipeline configured in HttpClient setup
+
+**Key NuGet Packages:**
+- Microsoft.Extensions.Http.Resilience (or Polly)
 
 ### Step 5: System Prompt Engineering
 **Goal:** Give the agent personality, capability awareness, and clear instructions
@@ -139,7 +173,7 @@ This section outlines an incremental, iterative approach to building the agent. 
 - Instructions for tool usage (when tools are added)
 - Response format guidance
 - Capability boundaries and limitations
-- Configuration to customize system prompt
+- Configuration to customize system prompt via appsettings.json
 
 **Capabilities:**
 - Agent has clear sense of purpose
@@ -150,24 +184,26 @@ This section outlines an incremental, iterative approach to building the agent. 
 **Acceptance Criteria:**
 - Default system prompt defines agent purpose
 - System prompt explains how to behave
-- System prompt is easily configurable
+- System prompt is easily configurable in appsettings.json
 - Agent behavior reflects system prompt instructions
 - Tested with various prompt configurations
+- System prompt stored in configuration and injected via IOptions
 
 ### Step 6: Tool Abstraction
 **Goal:** Enable agent to use external tools for release risk assessment
 
 **Components:**
-- Tool definition data model
-- Tool call and tool result data models
-- Tool registry and execution framework
+- Tool definition data model (ToolDefinition record)
+- Tool call and tool result data models (ToolCall, ToolResult records)
+- IToolRegistry interface and implementation
+- Tool execution framework (ToolExecutor class)
 - Tool loop in agent core
-- Release risk assessment tools (get_release_summary, file_risk_report)
+- Release risk assessment tools (GetReleaseSummaryTool, FileRiskReportTool)
 - Tool formatting for provider-specific APIs
-- Mock HTTP endpoints or static test data for tools
+- Mock HTTP endpoints using WireMock.Net or static test data for tools
 
 **Capabilities:**
-- Register tools with agent
+- Register tools with agent using IToolRegistry
 - Agent receives tool definitions in LLM calls
 - LLM can request tool execution
 - Agent executes tools and returns results
@@ -176,32 +212,34 @@ This section outlines an incremental, iterative approach to building the agent. 
 - Tool calls tracked in traces
 
 **Acceptance Criteria:**
-- Tool abstraction interface defined
-- Tools can be registered with agent
-- Agent formats tools for provider API
+- IToolRegistry interface defined
+- Tools can be registered with agent (dependency injection)
+- Agent formats tools for provider API (Anthropic format, OpenRouter format, etc.)
 - Tool execution loop works end-to-end
-- get_release_summary returns mock release data
-- file_risk_report accepts and validates risk reports
+- GetReleaseSummaryTool returns mock release data
+- FileRiskReportTool accepts and validates risk reports
 - Tool calls and results visible in conversation history
-- Tool execution captured in traces with timing
-- Error handling for tool failures
-- Automated tests for tool framework and both tools
+- Tool execution captured in traces with timing using Activity
+- Error handling for tool failures (ToolExecutionException)
+- Automated xUnit tests for tool framework and both tools
 - CLI demo of release risk assessment workflow
+- Tools registered in dependency injection container
 
 **Optional Enhancement:**
-- Add web search tool (DuckDuckGo) as additional capability demonstration
+- Add web search tool (using HttpClient) as additional capability demonstration
 
 ### Step 7: Evaluation System
 **Goal:** Validate agent behavior through automated evaluation
 
 **Components:**
-- Test case definitions with expected behaviors
+- Separate evaluation project (DetectiveAgent.Evaluations.csproj)
+- Test case definitions with expected behaviors (C# classes)
 - Tool usage evaluation (behavioral validation)
 - Decision quality evaluation (output validation)
 - Error handling evaluation (robustness validation)
 - Regression tracking (performance over time)
-- Structured report generation (machine-readable output)
-- Eval runner and reporting
+- Structured report generation (machine-readable JSON output)
+- Evaluation runner and reporting
 
 **Evaluation Dimensions:**
 
@@ -213,17 +251,30 @@ Validates the agent's behavioral choices:
 - Does it handle tool errors appropriately?
 
 **Example Test Cases:**
-```python
+```csharp
+public class HighRiskScenario : IEvaluationScenario
 {
-  "scenario": "high_risk_release",
-  "release_data": {
-    "version": "v2.1.0",
-    "changes": ["Payment processing"],
-    "tests": {"passed": 140, "failed": 5},
-    "deployment_metrics": {"error_rate": 0.08}
-  },
-  "expected_tools": ["get_release_summary", "file_risk_report"],
-  "expected_tool_order": "get before post"
+    public string ScenarioId => "high_risk_release";
+    
+    public ReleaseData ReleaseData => new()
+    {
+        Version = "v2.1.0",
+        Changes = ["Payment processing"],
+        Tests = new TestResults 
+        { 
+            Passed = 140, 
+            Failed = 5 
+        },
+        DeploymentMetrics = new() 
+        { 
+            ErrorRate = 0.08 
+        }
+    };
+    
+    public string[] ExpectedTools => 
+        ["get_release_summary", "file_risk_report"];
+        
+    public string ExpectedToolOrder => "get before post";
 }
 ```
 
@@ -234,18 +285,29 @@ Validates the agent's risk assessment accuracy:
 - Is the reasoning sound given the data?
 
 **Example Evaluation:**
-```python
-def eval_risk_assessment(agent_output, expected):
-    severity_correct = agent_output.severity == expected.severity
-    risks_identified = check_overlap(
-        agent_output.findings,
-        expected.key_risks
-    )
-    return {
-        "severity_correct": severity_correct,
-        "risk_recall": risks_identified,
-        "pass": severity_correct and risks_identified >= 0.7
+```csharp
+public class DecisionQualityEvaluator : IEvaluator
+{
+    public EvaluationResult Evaluate(
+        AgentOutput agentOutput, 
+        ExpectedOutput expected)
+    {
+        var severityCorrect = 
+            agentOutput.Severity == expected.Severity;
+            
+        var risksIdentified = CalculateOverlap(
+            agentOutput.Findings,
+            expected.KeyRisks
+        );
+        
+        return new EvaluationResult
+        {
+            SeverityCorrect = severityCorrect,
+            RiskRecall = risksIdentified,
+            Passed = severityCorrect && risksIdentified >= 0.7
+        };
     }
+}
 ```
 
 #### 3. Error Handling Evaluation
@@ -263,7 +325,7 @@ Monitors evaluation performance over time:
 - Provides comparison reports showing deltas
 
 **Key Features:**
-- Save baseline results for future comparison
+- Save baseline results for future comparison (JSON files)
 - Compare current results to baseline
 - Identify regressions (performance drops >5%)
 - Identify improvements (performance gains >5%)
@@ -285,17 +347,26 @@ Produces machine-readable evaluation output:
 - Edge cases: Missing data fields, API errors, unexpected responses
 
 **Acceptance Criteria:**
-- Eval framework can run test scenarios automatically
+- Evaluation framework can run test scenarios automatically
 - Tool usage evaluated for correctness and ordering
 - Decision quality measured against expected outcomes
 - Error handling scenarios validate robustness
 - Test suite includes 5+ scenarios covering risk spectrum and error cases
 - Regression tracking compares to baseline
-- Structured JSON reports generated for automation
-- Eval results include pass/fail and diagnostic details
-- Automated tests verify eval framework itself
-- Documentation explains how to add new eval cases
-- CLI supports baseline establishment and comparison
+- Structured JSON reports generated for automation using System.Text.Json
+- Evaluation results include pass/fail and diagnostic details
+- Automated xUnit tests verify evaluation framework itself
+- Documentation explains how to add new evaluation cases
+- CLI command supports baseline establishment and comparison
+- Separate evaluation project with its own dependencies
+
+**Key .NET Commands:**
+```bash
+dotnet new xunit -n DetectiveAgent.Evaluations -o tests/DetectiveAgent.Evaluations
+dotnet sln add tests/DetectiveAgent.Evaluations
+dotnet add tests/DetectiveAgent.Evaluations reference src/DetectiveAgent
+dotnet test tests/DetectiveAgent.Evaluations
+```
 
 **Future Evaluation Options:**
 - Conversation quality: Can the agent explain its reasoning when asked?
@@ -308,16 +379,62 @@ Produces machine-readable evaluation output:
 **Goal:** Expand agent capabilities with more tools and features
 
 **Potential Additions:**
-- Additional tools (file operations, calculator, web search, etc.)
+- Additional tools (file operations, calculator, web search via HttpClient, etc.)
 - Multi-provider support (expand beyond initial provider)
 - Advanced context management (summarization, importance-based)
-- Async tool execution
+- Async tool execution with Task.WhenAll
 - Tool composition and chaining
 - User confirmation for sensitive tools
 - Feedback loops and self-correction
 - Conversation branching and exploration
 - Progressive investigation (drill-down tools)
-- Multi-agent coordination
+- Multi-agent coordination using separate Agent instances
+- ASP.NET Core API for agent interactions
+- Blazor UI for conversational interface
+- Azure deployment options (Azure Container Apps, Azure Functions)
+- Azure OpenAI Service integration
+- Semantic Kernel integration for advanced scenarios
 
 **Note:** These are not prescribed steps but rather areas for future exploration based on specific use cases and requirements.
 
+## .NET-Specific Implementation Notes
+
+### Modern C# Features to Leverage
+- **Records** for immutable data models (Message, Conversation, ToolDefinition)
+- **Nullable reference types** enabled for compile-time null safety
+- **Pattern matching** for error classification and message handling
+- **Async streams** (IAsyncEnumerable) for streaming responses (future)
+- **Init-only properties** for configuration objects
+- **Required members** for ensuring critical properties are set
+- **File-scoped namespaces** to reduce indentation
+- **Global usings** to reduce boilerplate
+
+### Dependency Injection Best Practices
+- Register services in Program.cs or Startup.cs
+- Use IOptions<T> pattern for configuration
+- Scope services appropriately (Singleton, Scoped, Transient)
+- Use IHttpClientFactory for all HTTP calls
+- Register ActivitySource as singleton
+
+### Testing Best Practices
+- Use xUnit as the test framework
+- Moq or NSubstitute for mocking
+- WireMock.Net for HTTP integration tests
+- Arrange-Act-Assert pattern
+- Test async methods properly with async/await
+- Use IClassFixture for expensive setup
+- Use [Theory] and [InlineData] for parameterized tests
+
+### Performance Considerations
+- Use ValueTask<T> for hot paths that often complete synchronously
+- Leverage Span<T> and Memory<T> for high-performance scenarios
+- Use System.Text.Json for efficient serialization
+- Consider object pooling for frequently allocated objects
+- Profile with BenchmarkDotNet if performance is critical
+
+### Deployment Options
+- Self-contained deployment for CLI tool
+- Docker containerization
+- Azure Container Apps for cloud deployment
+- Azure Functions for serverless scenarios
+- Windows Service or systemd service for background processing
