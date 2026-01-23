@@ -46,7 +46,7 @@ public class TracingTests
                 It.IsAny<IReadOnlyList<Message>>(),
                 It.IsAny<CancellationToken>(),
                 It.IsAny<float?>(),
-                It.IsAny<int?>()))
+                It.IsAny<int?>(), It.IsAny<IReadOnlyList<DetectiveAgent.Tools.ToolDefinition>?>()))
             .ReturnsAsync(new Message(
                 MessageRole.Assistant,
                 "Test response",

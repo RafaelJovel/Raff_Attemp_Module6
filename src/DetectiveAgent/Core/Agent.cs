@@ -16,6 +16,8 @@ public class Agent
     private readonly IConversationStore _store;
     private readonly ILogger<Agent> _logger;
     private readonly ContextWindowManager _contextManager;
+    private readonly Tools.IToolRegistry? _toolRegistry;
+    private readonly Tools.ToolExecutor? _toolExecutor;
     private Conversation? _currentConversation;
     private readonly float _defaultTemperature;
     private readonly int _defaultMaxTokens;
@@ -28,7 +30,9 @@ public class Agent
         ContextWindowManager contextManager,
         string systemPrompt = "You are a helpful AI assistant.",
         float defaultTemperature = 0.7f,
-        int defaultMaxTokens = 4096)
+        int defaultMaxTokens = 4096,
+        Tools.IToolRegistry? toolRegistry = null,
+        Tools.ToolExecutor? toolExecutor = null)
     {
         _provider = provider ?? throw new ArgumentNullException(nameof(provider));
         _store = store ?? throw new ArgumentNullException(nameof(store));
@@ -37,6 +41,8 @@ public class Agent
         _defaultTemperature = defaultTemperature;
         _defaultMaxTokens = defaultMaxTokens;
         _systemPrompt = systemPrompt;
+        _toolRegistry = toolRegistry;
+        _toolExecutor = toolExecutor;
 
         // Don't create conversation here - will be lazily created on first use
         // This ensures OpenTelemetry is initialized before creating activities
@@ -125,15 +131,89 @@ public class Agent
                     managedContext.Utilization);
             }
 
-            // Call LLM provider with managed context
-            var assistantMessage = await _provider.CompleteAsync(
-                managedContext.Messages,
-                cancellationToken,
-                _defaultTemperature,
-                _defaultMaxTokens);
+            // Get tools if registry is available
+            var tools = _toolRegistry?.GetTools();
 
-            // Add assistant response to conversation
-            _currentConversation.Messages.Add(assistantMessage);
+            // Tool execution loop
+            Message assistantMessage;
+            var loopCount = 0;
+            const int maxLoops = 10; // Prevent infinite loops
+
+            while (loopCount < maxLoops)
+            {
+                loopCount++;
+                activity?.SetTag($"loop.iteration", loopCount);
+
+                // Call LLM provider with managed context and tools
+                assistantMessage = await _provider.CompleteAsync(
+                    managedContext.Messages,
+                    cancellationToken,
+                    _defaultTemperature,
+                    _defaultMaxTokens,
+                    tools);
+
+                // Add assistant response to conversation
+                _currentConversation.Messages.Add(assistantMessage);
+
+                // Check if response contains tool calls
+                var toolCalls = assistantMessage.Metadata?.ContainsKey("toolCalls") == true
+                    ? assistantMessage.Metadata["toolCalls"] as List<Tools.ToolCall>
+                    : null;
+
+                if (toolCalls == null || toolCalls.Count == 0)
+                {
+                    // No tool calls - we're done
+                    _logger.LogInformation("No tool calls in response, completing");
+                    break;
+                }
+
+                // Execute tool calls
+                _logger.LogInformation("Executing {ToolCallCount} tool calls", toolCalls.Count);
+                activity?.SetTag($"loop.{loopCount}.tool_calls", toolCalls.Count);
+
+                if (_toolExecutor == null)
+                {
+                    _logger.LogError("Tool calls requested but no ToolExecutor available");
+                    throw new InvalidOperationException("Tool calls requested but no ToolExecutor configured");
+                }
+
+                foreach (var toolCall in toolCalls)
+                {
+                    // Execute the tool
+                    var toolResult = await _toolExecutor.ExecuteAsync(toolCall, cancellationToken);
+
+                    // Add tool result as a user message
+                    var toolResultMessage = new Message(
+                        MessageRole.User,
+                        $"Tool result for {toolCall.Name} (id: {toolCall.Id}):\n{toolResult.Content}",
+                        toolResult.Timestamp,
+                        new Dictionary<string, object>
+                        {
+                            ["toolCallId"] = toolResult.ToolCallId,
+                            ["toolName"] = toolCall.Name,
+                            ["toolSuccess"] = toolResult.Success
+                        });
+
+                    _currentConversation.Messages.Add(toolResultMessage);
+                }
+
+                // Re-manage context for next iteration
+                managedContext = await _contextManager.ManageContextAsync(
+                    _currentConversation.SystemPrompt,
+                    _currentConversation.Messages,
+                    _provider,
+                    _defaultMaxTokens,
+                    cancellationToken);
+            }
+
+            if (loopCount >= maxLoops)
+            {
+                _logger.LogWarning("Tool execution loop reached maximum iterations ({MaxLoops})", maxLoops);
+                activity?.AddEvent(new ActivityEvent("MaxLoopIterationsReached"));
+            }
+
+            // Get the final assistant message
+            assistantMessage = _currentConversation.Messages.Last(m => m.Role == MessageRole.Assistant);
 
             // Extract token information from metadata
             int inputTokens = 0;

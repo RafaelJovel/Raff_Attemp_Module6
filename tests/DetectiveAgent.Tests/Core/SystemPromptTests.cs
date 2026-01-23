@@ -92,7 +92,7 @@ public class SystemPromptTests
                 It.IsAny<IReadOnlyList<Message>>(),
                 It.IsAny<CancellationToken>(),
                 It.IsAny<float?>(),
-                It.IsAny<int?>()))
+                It.IsAny<int?>(), It.IsAny<IReadOnlyList<DetectiveAgent.Tools.ToolDefinition>?>()))
             .ReturnsAsync(new Message(MessageRole.Assistant, "Response", DateTimeOffset.UtcNow));
 
         var agent = new Agent(
@@ -123,9 +123,9 @@ public class SystemPromptTests
                 It.IsAny<IReadOnlyList<Message>>(),
                 It.IsAny<CancellationToken>(),
                 It.IsAny<float?>(),
-                It.IsAny<int?>()))
-            .Callback<IReadOnlyList<Message>, CancellationToken, float?, int?>(
-                (msgs, ct, temp, maxTokens) => sentMessages = msgs)
+                It.IsAny<int?>(), It.IsAny<IReadOnlyList<DetectiveAgent.Tools.ToolDefinition>?>()))
+            .Callback<IReadOnlyList<Message>, CancellationToken, float?, int?, IReadOnlyList<DetectiveAgent.Tools.ToolDefinition>>(
+                (msgs, ct, temp, maxTokens, tools) => sentMessages = msgs)
             .ReturnsAsync(new Message(MessageRole.Assistant, "Response", DateTimeOffset.UtcNow));
 
         var agent = new Agent(
@@ -278,7 +278,7 @@ You are direct and thorough in your assessments.";
                 It.IsAny<IReadOnlyList<Message>>(),
                 It.IsAny<CancellationToken>(),
                 It.IsAny<float?>(),
-                It.IsAny<int?>()))
+                It.IsAny<int?>(), It.IsAny<IReadOnlyList<DetectiveAgent.Tools.ToolDefinition>?>()))
             .ReturnsAsync(new Message(MessageRole.Assistant, "Response", DateTimeOffset.UtcNow));
 
         var agent = new Agent(
@@ -341,7 +341,7 @@ You are direct and thorough in your assessments.";
                 It.IsAny<IReadOnlyList<Message>>(),
                 It.IsAny<CancellationToken>(),
                 It.IsAny<float?>(),
-                It.IsAny<int?>()))
+                It.IsAny<int?>(), It.IsAny<IReadOnlyList<DetectiveAgent.Tools.ToolDefinition>?>()))
             .ReturnsAsync(new Message(MessageRole.Assistant, "Response", DateTimeOffset.UtcNow));
 
         var agent = new Agent(

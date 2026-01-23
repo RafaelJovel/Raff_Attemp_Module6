@@ -1,6 +1,7 @@
 namespace DetectiveAgent.Providers;
 
 using DetectiveAgent.Core;
+using DetectiveAgent.Tools;
 
 /// <summary>
 /// Abstraction for LLM providers to enable provider-agnostic agent implementation.
@@ -14,7 +15,8 @@ public interface ILlmProvider
         IReadOnlyList<Message> messages,
         CancellationToken cancellationToken = default,
         float? temperature = null,
-        int? maxTokens = null);
+        int? maxTokens = null,
+        IReadOnlyList<ToolDefinition>? tools = null);
 
     /// <summary>
     /// Estimate token count for messages (used for context window management).

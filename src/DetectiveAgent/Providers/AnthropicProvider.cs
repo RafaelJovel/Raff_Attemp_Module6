@@ -41,7 +41,8 @@ public class AnthropicProvider : ILlmProvider
         IReadOnlyList<Message> messages,
         CancellationToken cancellationToken = default,
         float? temperature = null,
-        int? maxTokens = null)
+        int? maxTokens = null,
+        IReadOnlyList<Tools.ToolDefinition>? tools = null)
     {
         using var activity = AgentActivitySource.Instance.StartActivity(
             "Provider.Complete",
@@ -52,6 +53,7 @@ public class AnthropicProvider : ILlmProvider
         activity?.SetTag("temperature", temperature ?? 0.7f);
         activity?.SetTag("max_tokens", maxTokens ?? 4096);
         activity?.SetTag("message_count", messages.Count);
+        activity?.SetTag("tools_count", tools?.Count ?? 0);
 
         try
         {
@@ -69,7 +71,8 @@ public class AnthropicProvider : ILlmProvider
                 }).ToList(),
                 System = systemPrompt,
                 MaxTokens = maxTokens ?? 4096,
-                Temperature = temperature
+                Temperature = temperature,
+                Tools = tools?.Count > 0 ? FormatToolsForAnthropic(tools) : null
             };
 
             var httpRequest = new HttpRequestMessage(HttpMethod.Post, "/v1/messages")
@@ -111,13 +114,35 @@ public class AnthropicProvider : ILlmProvider
                 throw new LlmProviderException("Empty response from Anthropic API");
             }
 
-            var messageContent = anthropicResponse.Content[0].Text;
+            // Build message content and detect tool calls
+            var messageContent = new System.Text.StringBuilder();
+            var toolCalls = new List<Tools.ToolCall>();
+
+            foreach (var block in anthropicResponse.Content)
+            {
+                if (block.Type == "text" && !string.IsNullOrEmpty(block.Text))
+                {
+                    messageContent.Append(block.Text);
+                }
+                else if (block.Type == "tool_use" && block.ToolUse != null)
+                {
+                    var toolCall = new Tools.ToolCall
+                    {
+                        Id = block.ToolUse.Id,
+                        Name = block.ToolUse.Name,
+                        Arguments = JsonDocument.Parse(JsonSerializer.Serialize(block.ToolUse.Input)),
+                        Timestamp = DateTimeOffset.UtcNow
+                    };
+                    toolCalls.Add(toolCall);
+                }
+            }
             
             // Add token usage to trace
             activity?.SetTag("inputTokens", anthropicResponse.Usage.InputTokens);
             activity?.SetTag("outputTokens", anthropicResponse.Usage.OutputTokens);
             activity?.SetTag("totalTokens", anthropicResponse.Usage.InputTokens + anthropicResponse.Usage.OutputTokens);
             activity?.SetTag("stop_reason", anthropicResponse.StopReason ?? "unknown");
+            activity?.SetTag("tool_calls_count", toolCalls.Count);
             
             var metadata = new Dictionary<string, object>
             {
@@ -128,14 +153,20 @@ public class AnthropicProvider : ILlmProvider
                 ["stop_reason"] = anthropicResponse.StopReason ?? "unknown"
             };
 
-            _logger.LogInformation("Received response from Anthropic: {InputTokens} input tokens, {OutputTokens} output tokens",
-                anthropicResponse.Usage.InputTokens, anthropicResponse.Usage.OutputTokens);
+            // Add tool calls to metadata if present
+            if (toolCalls.Count > 0)
+            {
+                metadata["toolCalls"] = toolCalls;
+            }
+
+            _logger.LogInformation("Received response from Anthropic: {InputTokens} input tokens, {OutputTokens} output tokens, {ToolCallsCount} tool calls",
+                anthropicResponse.Usage.InputTokens, anthropicResponse.Usage.OutputTokens, toolCalls.Count);
 
             activity?.SetStatus(ActivityStatusCode.Ok);
             
             return new Message(
                 MessageRole.Assistant,
-                messageContent,
+                messageContent.ToString(),
                 DateTimeOffset.UtcNow,
                 metadata);
         }
@@ -173,6 +204,20 @@ public class AnthropicProvider : ILlmProvider
         );
     }
 
+    #region Tool Formatting
+
+    private List<AnthropicTool> FormatToolsForAnthropic(IReadOnlyList<Tools.ToolDefinition> tools)
+    {
+        return tools.Select(tool => new AnthropicTool
+        {
+            Name = tool.Name,
+            Description = tool.Description,
+            InputSchema = JsonSerializer.Deserialize<JsonElement>(tool.ParametersSchema.RootElement.GetRawText())
+        }).ToList();
+    }
+
+    #endregion
+
     #region Anthropic API Models
 
     private class AnthropicRequest
@@ -193,6 +238,22 @@ public class AnthropicProvider : ILlmProvider
         [JsonPropertyName("temperature")]
         [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
         public float? Temperature { get; set; }
+
+        [JsonPropertyName("tools")]
+        [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
+        public List<AnthropicTool>? Tools { get; set; }
+    }
+
+    private class AnthropicTool
+    {
+        [JsonPropertyName("name")]
+        public required string Name { get; set; }
+
+        [JsonPropertyName("description")]
+        public required string Description { get; set; }
+
+        [JsonPropertyName("input_schema")]
+        public required JsonElement InputSchema { get; set; }
     }
 
     private class AnthropicMessage
@@ -226,6 +287,27 @@ public class AnthropicProvider : ILlmProvider
 
         [JsonPropertyName("text")]
         public string Text { get; set; } = string.Empty;
+
+        [JsonPropertyName("id")]
+        public string? Id { get; set; }
+
+        [JsonPropertyName("name")]
+        public string? Name { get; set; }
+
+        [JsonPropertyName("input")]
+        public JsonElement? Input { get; set; }
+
+        // Convenience property for tool_use blocks
+        public ToolUseBlock? ToolUse => Type == "tool_use" && !string.IsNullOrEmpty(Name)
+            ? new ToolUseBlock { Id = Id ?? string.Empty, Name = Name, Input = Input ?? default }
+            : null;
+    }
+
+    private class ToolUseBlock
+    {
+        public required string Id { get; set; }
+        public required string Name { get; set; }
+        public JsonElement Input { get; set; }
     }
 
     private class Usage

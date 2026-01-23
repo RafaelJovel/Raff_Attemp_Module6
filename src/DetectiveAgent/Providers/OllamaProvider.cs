@@ -37,7 +37,8 @@ public class OllamaProvider : ILlmProvider
         IReadOnlyList<Message> messages,
         CancellationToken cancellationToken = default,
         float? temperature = null,
-        int? maxTokens = null)
+        int? maxTokens = null,
+        IReadOnlyList<Tools.ToolDefinition>? tools = null)
     {
         using var activity = AgentActivitySource.Instance.StartActivity(
             "Provider.Complete",

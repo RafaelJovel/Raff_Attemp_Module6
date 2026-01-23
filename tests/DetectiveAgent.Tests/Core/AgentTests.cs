@@ -47,7 +47,8 @@ public class AgentTests
                 It.IsAny<IReadOnlyList<Message>>(),
                 It.IsAny<CancellationToken>(),
                 It.IsAny<float?>(),
-                It.IsAny<int?>()))
+                It.IsAny<int?>(),
+                It.IsAny<IReadOnlyList<DetectiveAgent.Tools.ToolDefinition>?>()))
             .ReturnsAsync(expectedResponse);
 
         _mockStore
@@ -73,7 +74,8 @@ public class AgentTests
             It.IsAny<IReadOnlyList<Message>>(),
             It.IsAny<CancellationToken>(),
             It.IsAny<float?>(),
-            It.IsAny<int?>()), Times.Once);
+            It.IsAny<int?>(),
+            It.IsAny<IReadOnlyList<DetectiveAgent.Tools.ToolDefinition>?>()), Times.Once);
         
         // Verify conversation was saved
         _mockStore.Verify(s => s.SaveAsync(
@@ -93,7 +95,8 @@ public class AgentTests
                 It.IsAny<IReadOnlyList<Message>>(),
                 It.IsAny<CancellationToken>(),
                 It.IsAny<float?>(),
-                It.IsAny<int?>()))
+                It.IsAny<int?>(),
+                It.IsAny<IReadOnlyList<DetectiveAgent.Tools.ToolDefinition>?>()))
             .ReturnsAsync(response1)
             .ReturnsAsync(response2);
 

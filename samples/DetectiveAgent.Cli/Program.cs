@@ -162,14 +162,31 @@ builder.Services.AddSingleton<IConversationStore>(sp =>
 // Register context window manager
 builder.Services.AddSingleton<ContextWindowManager>();
 
-// Register agent
+// Register tool infrastructure
+builder.Services.AddSingleton<DetectiveAgent.Tools.IToolRegistry, DetectiveAgent.Tools.ToolRegistry>();
+builder.Services.AddSingleton<DetectiveAgent.Tools.ToolExecutor>();
+
+// Register agent with tools
 builder.Services.AddSingleton(sp =>
 {
     var provider = sp.GetRequiredService<ILlmProvider>();
     var store = sp.GetRequiredService<IConversationStore>();
     var logger = sp.GetRequiredService<ILogger<Agent>>();
     var contextManager = sp.GetRequiredService<ContextWindowManager>();
-    return new Agent(provider, store, logger, contextManager, systemPrompt, temperature, maxTokens);
+    var toolRegistry = sp.GetRequiredService<DetectiveAgent.Tools.IToolRegistry>();
+    var toolExecutor = sp.GetRequiredService<DetectiveAgent.Tools.ToolExecutor>();
+    
+    // Register tools
+    var releaseSummaryLogger = sp.GetRequiredService<ILogger<DetectiveAgent.Tools.Implementations.GetReleaseSummaryTool>>();
+    var releaseSummaryTool = DetectiveAgent.Tools.Implementations.GetReleaseSummaryTool.CreateDefinition(releaseSummaryLogger);
+    toolRegistry.RegisterTool(releaseSummaryTool);
+    
+    var fileRiskReportLogger = sp.GetRequiredService<ILogger<DetectiveAgent.Tools.Implementations.FileRiskReportTool>>();
+    var reportsPath = configuration["Storage:RiskReportsPath"] ?? "./data/risk-reports";
+    var fileRiskReportTool = DetectiveAgent.Tools.Implementations.FileRiskReportTool.CreateDefinition(fileRiskReportLogger, reportsPath);
+    toolRegistry.RegisterTool(fileRiskReportTool);
+    
+    return new Agent(provider, store, logger, contextManager, systemPrompt, temperature, maxTokens, toolRegistry, toolExecutor);
 });
 
 var host = builder.Build();
